@@ -8,10 +8,21 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { basename } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IRange } from '../../../../editor/common/core/range.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IChatEditingService } from '../common/chatEditingService.js';
 import { IChatRequestVariableEntry } from '../common/chatModel.js';
+import { PromptFileReference } from '../common/promptFileReference.js';
+import { PromptInstructionsFileReader } from './attachments/promptInstructionsAttachment.js';
 
 export class ChatAttachmentModel extends Disposable {
+	constructor(
+		@IInstantiationService private readonly initService: IInstantiationService,
+	) {
+		super();
+
+		this.instructionsFileReader = initService.createInstance(PromptInstructionsFileReader);
+	}
+
 	private _attachments = new Map<string, IChatRequestVariableEntry>();
 	get attachments(): ReadonlyArray<IChatRequestVariableEntry> {
 		return Array.from(this._attachments.values());
@@ -69,9 +80,46 @@ export class ChatAttachmentModel extends Disposable {
 		}
 	}
 
+	private _promptInstructions: PromptFileReference | undefined;
+	public get promptInstructions(): PromptFileReference | undefined {
+		return this._promptInstructions;
+	}
+
+	public addPromptInstructions(uri: URI): this {
+		this._promptInstructions = this.initService.createInstance(PromptFileReference, uri);
+		this._promptInstructions.resolve();
+
+		// TODO: @legomushroom - fire only if ref has changed?
+		this._onDidChangeContext.fire();
+
+		return this;
+	}
+
+	public removePromptInstructions(): this {
+		this._promptInstructions?.dispose();
+		delete this._promptInstructions;
+
+		// TODO: @legomushroom - fire only if ref has changed?
+		this._onDidChangeContext.fire();
+
+		return this;
+	}
+
+	private readonly instructionsFileReader: PromptInstructionsFileReader;
+
+	public async listInstructionFiles(): Promise<readonly URI[]> {
+		return this.instructionsFileReader.listFiles();
+	}
+
 	clearAndSetContext(...attachments: IChatRequestVariableEntry[]) {
 		this.clear();
 		this.addContext(...attachments);
+	}
+
+	public override dispose(): void {
+		this._promptInstructions?.dispose();
+
+		super.dispose();
 	}
 }
 
@@ -90,9 +138,10 @@ export class EditsAttachmentModel extends ChatAttachmentModel {
 	}
 
 	constructor(
+		@IInstantiationService _initService: IInstantiationService,
 		@IChatEditingService private readonly _chatEditingService: IChatEditingService,
 	) {
-		super();
+		super(_initService);
 	}
 
 	private isExcludeFileAttachment(fileAttachmentId: string) {

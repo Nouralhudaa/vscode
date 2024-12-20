@@ -65,7 +65,7 @@ export function registerChatContextActions() {
 /**
  * We fill the quickpick with these types, and enable some quick access providers
  */
-type IAttachmentQuickPickItem = ICommandVariableQuickPickItem | IQuickAccessQuickPickItem | IToolQuickPickItem | IImageQuickPickItem | IVariableQuickPickItem | IOpenEditorsQuickPickItem | ISearchResultsQuickPickItem | IScreenShotQuickPickItem | IRelatedFilesQuickPickItem;
+type IAttachmentQuickPickItem = ICommandVariableQuickPickItem | IQuickAccessQuickPickItem | IToolQuickPickItem | IImageQuickPickItem | IVariableQuickPickItem | IOpenEditorsQuickPickItem | ISearchResultsQuickPickItem | IScreenShotQuickPickItem | IRelatedFilesQuickPickItem | IPromptInstructionsQuickPickItem;
 
 /**
  * These are the types that we can get out of the quick pick
@@ -117,6 +117,14 @@ function isRelatedFileQuickPickItem(obj: unknown): obj is IRelatedFilesQuickPick
 		typeof obj === 'object'
 		&& (obj as IRelatedFilesQuickPickItem).kind === 'related-files'
 	);
+}
+
+function isPromptInstructionsQuickPickItem(obj: unknown): obj is IRelatedFilesQuickPickItem {
+	if (!obj || typeof obj !== 'object') {
+		return false;
+	}
+
+	return ('kind' in obj && obj.kind === 'prompt-instructions');
 }
 
 interface IRelatedFilesQuickPickItem extends IQuickPickItem {
@@ -175,6 +183,11 @@ interface IScreenShotQuickPickItem extends IQuickPickItem {
 	kind: 'screenshot';
 	id: string;
 	icon?: ThemeIcon;
+}
+
+interface IPromptInstructionsQuickPickItem extends IQuickPickItem {
+	kind: 'prompt-instructions';
+	id: string;
 }
 
 abstract class AttachFileAction extends Action2 {
@@ -544,6 +557,27 @@ export class AttachContextAction extends Action2 {
 				if (blob) {
 					toAttach.push(convertBufferToScreenshotVariable(blob));
 				}
+			} else if (isPromptInstructionsQuickPickItem(pick)) {
+				const filesPromise = widget.attachmentModel.listInstructionFiles()
+					.then((files) => {
+						return files.map((file) => {
+							const result: IQuickPickItem & { value: URI } = {
+								type: 'item',
+								label: labelService.getUriBasenameLabel(file),
+								description: labelService.getUriLabel(dirname(file), { relative: true }),
+								value: file,
+							};
+
+							return result;
+						});
+					});
+
+				const selectedFile = await quickInputService.pick(filesPromise, { placeHolder: localize('promptInstructions', 'Add prompt instructions file'), canPickMany: false });
+				if (!selectedFile) {
+					return;
+				}
+
+				widget.attachmentModel.addPromptInstructions(selectedFile.value);
 			} else {
 				// Anything else is an attachment
 				const attachmentPick = pick as IAttachmentQuickPickItem;
@@ -756,6 +790,13 @@ export class AttachContextAction extends Action2 {
 				});
 			}
 		}
+
+		quickPickItems.push({
+			kind: 'prompt-instructions',
+			id: 'prompt-instructions',
+			label: localize('chatContext.promptInstructions', 'Prompt Instructions'),
+			iconClass: ThemeIcon.asClassName(Codicon.lightbulbAutofix),
+		});
 
 		function extractTextFromIconLabel(label: string | undefined): string {
 			if (!label) {
